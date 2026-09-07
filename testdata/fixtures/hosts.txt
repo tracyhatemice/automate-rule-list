@@ -1,0 +1,8 @@
+# hosts
+127.0.0.1 localhost
+127.0.0.1	localhost.localdomain
+::1 localhost ip6-localhost ip6-loopback
+0.0.0.0 ads.example.com
+0.0.0.0 tracker.example.com # comment
+0.0.0.0 a.example.com b.example.com
+plain.example.com

@@ -1,0 +1,8 @@
+# build and caches (everything docker writes stays inside the project)
+/bin/
+/.cache/
+# runtime data
+/state/
+/dist/
+# local secrets
+/.env

@@ -1,0 +1,221 @@
+# rulegen configuration.
+#
+# Every job fetches its sources, cleans and deduplicates them, keeps the
+# result in state/<job>/intermediate.txt and, only when that content
+# changed, rewrites the outputs under dist/ with a fresh timestamp and
+# uploads the ones that have an s3 key. See README.md for the reference.
+
+state_dir: state
+timestamp_layout: "2006-01-02T15:04:05Z"
+
+http:
+  timeout: 60s
+  retries: 3
+  concurrency: 8
+
+# Uploads are skipped when no bucket is configured. Credentials come from
+# the usual AWS environment variables, shared config or instance role.
+s3:
+  bucket: ${RULEGEN_S3_BUCKET}
+  region: ${RULEGEN_S3_REGION}
+  endpoint: ${RULEGEN_S3_ENDPOINT}
+  prefix: ${RULEGEN_S3_PREFIX}
+
+jobs:
+  # ---------------------------------------------------------------- Mod 1
+  - name: adblock
+    kind: domain
+    sources:
+      - url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+        format: adblock
+      - url: https://raw.githubusercontent.com/AdguardTeam/cname-trackers/master/data/combined_disguised_trackers_justdomains.txt
+      - url: https://raw.githubusercontent.com/dibdot/DoH-IP-blocklists/master/doh-domains_overall.txt
+      - url: https://raw.githubusercontent.com/Cats-Team/AdRules/main/domain.txt
+      - url: https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/anti-ad-domains.txt
+      - url: https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/discretion/pcdn.txt
+      - url: https://raw.githubusercontent.com/privacy-protection-tools/anti-AD/master/discretion/dns.txt
+    filter:                # the same block is accepted on each source too
+      exclude: []          # e.g. "example.com" (and subdomains), "=exact.example.com", "/regex/"
+      exclude_from: []     # e.g. { file: adblock/allowlist.txt }
+    outputs:
+      - format: smartdns
+        path: dist/smartdns/adblock.conf
+        s3: { key: smartdns/adblock.conf }
+      - format: clash
+        path: dist/clash/adblock.yaml
+        s3: { key: clash/adblock.yaml }
+
+  # ---------------------------------------------------------------- Mod 2
+  - name: badips
+    kind: ip
+    aggregate: true
+    sources:
+      - url: https://github.com/stamparm/ipsum/raw/refs/heads/master/levels/3.txt
+      - url: https://iplists.firehol.org/files/firehol_level3.netset
+      - url: https://github.com/borestad/blocklist-abuseipdb/raw/refs/heads/main/abuseipdb-s100-3d.ipv4
+      - url: https://www.stopforumspam.com/downloads/toxic_ip_cidr.txt
+      - url: https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=1.1.1.1
+      - url: https://lists.blocklist.de/lists/all.txt
+      - url: https://blocklist.greensnow.co/greensnow.txt
+      - url: https://blackip.ustc.edu.cn/list.php?txt
+    filter:
+      exclude: []          # e.g. "192.168.0.0/16"
+    outputs:
+      - format: iplist
+        path: dist/badips.txt
+        s3: { key: badips.txt }
+
+  # ---------------------------------------------------------- Mod 3 mirror
+  - name: disney
+    kind: clash
+    mode: mirror
+    sources:
+      - url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/DisneyPlus.yaml
+    outputs:
+      - format: clash
+        path: dist/clash/disney.yaml
+        header:
+          - "mirror of https://github.com/ACL4SSR/ACL4SSR/blob/master/Clash/Providers/Ruleset/DisneyPlus.yaml"
+          - "alt-src: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/DisneyPlus.yaml"
+        s3: { key: clash/disney.yaml }
+
+  - name: google-cn
+    kind: clash
+    mode: mirror
+    sources:
+      - url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/GoogleCN.yaml
+    outputs:
+      - format: clash
+        path: dist/clash/google-cn.yaml
+        header:
+          - "mirror of https://github.com/ACL4SSR/ACL4SSR/blob/master/Clash/Providers/Ruleset/GoogleCN.yaml"
+          - "alt-src: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/GoogleCN.yaml"
+        s3: { key: clash/google-cn.yaml }
+
+  - name: private
+    kind: clash
+    mode: mirror
+    sources:
+      - url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt
+    outputs:
+      - format: clash
+        path: dist/clash/private.yaml
+        header:
+          - "mirror of https://github.com/Loyalsoldier/clash-rules/blob/release/private.txt"
+          - "alt-src: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt"
+        s3: { key: clash/private.yaml }
+
+  - name: youtube
+    kind: clash
+    mode: mirror
+    sources:
+      - url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/YouTube.yaml
+    outputs:
+      - format: clash
+        path: dist/clash/youtube.yaml
+        header:
+          - "mirror of https://github.com/ACL4SSR/ACL4SSR/blob/master/Clash/Providers/Ruleset/YouTube.yaml"
+          - "alt-src: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/YouTube.yaml"
+        s3: { key: clash/youtube.yaml }
+
+  # ------------------------------------------------------- Mod 3 aggregate
+  - name: netflix
+    kind: clash
+    sources:
+      - url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Netflix.yaml
+      - url: https://raw.githubusercontent.com/ipverse/as-ip-blocks/refs/heads/master/as/2906/ipv4-aggregated.txt
+      - url: https://raw.githubusercontent.com/ipverse/as-ip-blocks/refs/heads/master/as/2906/ipv6-aggregated.txt
+    outputs:
+      - format: clash
+        path: dist/clash/netflix.yaml
+        header:
+          - "aggregation of"
+          - "  https://github.com/ACL4SSR/ACL4SSR/blob/master/Clash/Providers/Ruleset/Netflix.yaml"
+          - "  AS2906 (NETFLIX)"
+          - "    https://raw.githubusercontent.com/ipverse/as-ip-blocks/refs/heads/master/as/2906/ipv4-aggregated.txt"
+          - "    https://raw.githubusercontent.com/ipverse/as-ip-blocks/refs/heads/master/as/2906/ipv6-aggregated.txt"
+          - "alt-src: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Netflix.yaml"
+        s3: { key: clash/netflix.yaml }
+
+  - name: telegram
+    kind: clash
+    sources:
+      - url: https://core.telegram.org/resources/cidr.txt
+      - url: https://cdn.jsdelivr.net/gh/ACL4SSR/ACL4SSR@master/Clash/Providers/Ruleset/Telegram.yaml
+    outputs:
+      - format: clash
+        path: dist/clash/telegram.yaml
+        header:
+          - "aggregation of"
+          - "  https://core.telegram.org/resources/cidr.txt"
+          - "  https://github.com/ACL4SSR/ACL4SSR/blob/master/Clash/Providers/Ruleset/Telegram.yaml"
+        s3: { key: clash/telegram.yaml }
+
+  # ---------------------------------------------------------------- Mod 4
+  # pbr: curated lists first (first-seen order is kept), then the gfwlist
+  # sources that update-list-file.sh used to merge.
+  - name: pbr
+    kind: domain
+    order: source
+    allow_tld: true      # the upstream lists route whole TLDs such as "goog" or "amazon"
+    sources:
+      - file: locallist/ai.txt
+      - file: locallist/google.txt
+      - file: locallist/openai.txt
+      - file: locallist/netflix.txt
+      - file: locallist/github.txt
+      - file: locallist/copilot.txt
+      - file: locallist/gfwlist-override.txt
+      - url: https://fastly.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt
+        format: autoproxy
+        encoding: base64
+        filter: &gfwlist-drops { exclude: [apple.com, sina.cn, sina.com.cn, baidu.com, qq.com] }
+      - url: https://fastly.jsdelivr.net/gh/YW5vbnltb3Vz/domain-list-community@release/gfwlist.txt
+        format: autoproxy
+        encoding: base64
+        filter: *gfwlist-drops
+      - url: https://fastly.jsdelivr.net/gh/hq450/fancyss/rules/gfwlist.conf
+        format: dnsmasq
+      - url: https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/proxy-list.txt
+        format: v2ray
+      - url: https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/gfw.txt
+        format: v2ray
+    outputs:
+      - format: plain
+        path: dist/pbr.list
+        timestamp: false
+        s3: { key: pbr.list }
+      - format: clash
+        path: dist/clash/gfwlist.yaml
+        s3: { key: clash/gfwlist.yaml }
+      - format: smartdns
+        path: dist/smartdns/pbr.conf
+        s3: { key: smartdns/pbr.conf }
+
+  - name: domestic
+    kind: domain
+    order: source
+    allow_tld: true      # "cn" and friends are meant to match every domain under them
+    sources:
+      - url: https://fastly.jsdelivr.net/gh/felixonmars/dnsmasq-china-list/accelerated-domains.china.conf
+        format: dnsmasq
+      - url: https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/direct-list.txt
+        format: v2ray
+      - file: locallist/direct-override.txt
+    # generate-list-file.sh also removed every domain that the proxy list
+    # already covers ("proxy domains win"). Jobs run in config order, so the
+    # pbr intermediate is available here; uncomment to restore that step.
+    # filter:
+    #   exclude_from:
+    #     - file: state/pbr/intermediate.txt
+    outputs:
+      - format: plain
+        path: dist/domestic-dns.list
+        timestamp: false
+        s3: { key: domestic-dns.list }
+      - format: clash
+        path: dist/clash/domestic.yaml
+        s3: { key: clash/domestic.yaml }
+      - format: smartdns
+        path: dist/smartdns/domestic.conf
+        s3: { key: smartdns/domestic.conf }

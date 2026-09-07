@@ -1,0 +1,5 @@
+# mirror comment
+payload:
+  - 'instant.arubanetworks.com'
+  - '+.internal'
+  - '+.localdomain'

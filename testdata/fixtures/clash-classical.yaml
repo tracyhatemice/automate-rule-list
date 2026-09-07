@@ -1,0 +1,8 @@
+payload:
+  # 内容：Netflix
+  # 数量：41条
+  - DOMAIN-KEYWORD,apiproxy-device-prod-nlb-
+  - DOMAIN,netflix.com.edgesuite.net
+  - DOMAIN-SUFFIX,fast.com
+  - IP-CIDR,23.246.0.0/18,no-resolve
+  - IP-CIDR6,2607:fb10::/32,no-resolve

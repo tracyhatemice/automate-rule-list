@@ -1,0 +1,17 @@
+[AutoProxy 0.2.9]
+! Checksum: IPrn2pEThwjqG8zr+AziXg
+! Title: GFWList
+||fxnetworks.com
+||addons.mozilla.org/*-*/firefox/addon/ublock-origin/*
+||cdn*.i-scmp.com
+|http://85.17.73.31/
+|http://www.dmm.com/netgame
+|https://secure.example.com
+.blogspot.com
+www.aolnews.com
+iipdigital.usembassy.gov/path
+@@||www.gov.tw
+@@/^https?:\/\/(?=.*?(2x3))[a-z0-9.-]+\.example\.com$
+/^https?:\/\/[^\/]+blogspot\.(.*)/
+|http://*.pimg.tw/
+||google.com/path

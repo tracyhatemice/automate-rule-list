@@ -1,0 +1,9 @@
+# v2ray domain list
+000webhost.com
+full:exact.example.com
+domain:suffix.example.com
+regexp:(^|\.)13mei[5-7]\.buzz$
+keyword:google
+include:geolocation-cn
+attr.example.com @cn
+full:attr2.example.com @ads @cn

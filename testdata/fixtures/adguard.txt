@@ -1,0 +1,24 @@
+!
+! Title: AdGuard DNS filter
+! Homepage: https://github.com/AdguardTeam/AdguardSDNSFilter
+[Adblock Plus 2.0]
+||dtipvw.com^
+||b1ll3r11.xyz^$important
+||tracker.example.com^$dnstype=AAAA
+||cdn*.i-scmp.com^
+@@||allowed.example.com^
+||rewrite.example.com^$dnsrewrite=NOERROR;A;127.0.0.1
+||deny.example.com^$denyallow=allowed.com
+||client.example.com^$client=192.168.0.1
+||bad.example.com^$badfilter
+||ctag.example.com^$ctag=device_pc
+/banner\d+\.gif/
+|http://example.org/ads
+example.com##.ad-banner
+example.com#@#.ad-banner
+||example.net^$$script
+plain-domain.com
+0.0.0.0 hosts-style.com
+127.0.0.1 localhost
+||nocaret.example.com
+||withpath.example.com/path^

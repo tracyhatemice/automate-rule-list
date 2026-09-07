@@ -1,0 +1,12 @@
+#
+# Aggregated Blocklist
+#
+1.0.164.165      # TH  AS23969   TOT Public Company Limited
+103.81.182.0/24
+### enternal ban (memo)
+111.201.200.0/24
+2001:a18:a:c5::e
+2a0a:c00::/29
+; semicolon comment
+// slash comment
+8.8.8.8	42
