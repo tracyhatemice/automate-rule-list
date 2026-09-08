@@ -87,9 +87,16 @@ next run without touching the targets that succeeded.
 rulegen check -c rulegen.yaml
 # dry-run: fetch and process, report what would change
 rulegen run -c rulegen.yaml --dry-run
-# run: fetch, process, and upload changed outputs
+# run once: fetch, process, and upload changed outputs
 rulegen run -c rulegen.yaml
+# keep running: repeat every 6 hours (30m, 6h, 1d …) until SIGINT/SIGTERM
+rulegen run -c rulegen.yaml --every 6h
 ```
+
+With `--every` the first run starts immediately, the interval is measured
+from the start of each run, the config file is re-read every cycle so
+edits apply without a restart, and a failed cycle is logged and retried at
+the next one. The minimum interval is one minute.
 
 ### Docker
 
@@ -110,7 +117,7 @@ UID=1000
 GID=1000
 ```
 
-Compose file for a one-shot container run:
+Compose file for a long-running container that refreshes the lists daily:
 
 ```yaml
 # /srv/rulegen/compose.yaml
@@ -131,52 +138,22 @@ services:
     volumes:
       - ./work:/work
     env_file: .env
-    command: ["run", "-c", "/work/rulegen.yaml"]
-    restart: "no"          # one-shot; scheduling is done by cron/systemd below
+    command: ["run", "-c", "/work/rulegen.yaml", "--every", "1d"]
+    restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 ```
 
-Try it once with `docker compose run --rm rulegen check -c /work/rulegen.yaml`,
-then create a systemd service and timer to run the container on a schedule:
-
-```ini
-# /etc/systemd/system/rulegen.service
-[Unit]
-Description=rulegen list refresh
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-WorkingDirectory=/srv/rulegen
-ExecStartPre=/usr/bin/docker compose pull --quiet
-ExecStart=/usr/bin/docker compose run --rm rulegen
+```sh
+docker compose run --rm rulegen check -c /work/rulegen.yaml   # try the config once
+docker compose up -d                                          # start the scheduler
+docker compose logs -f                                        # watch runs
+docker compose pull && docker compose up -d                   # update the image
 ```
 
-```ini
-# /etc/systemd/system/rulegen.timer
-[Unit]
-Description=Run rulegen daily
-
-[Timer]
-OnCalendar=*-*-* 18:30:00
-RandomizedDelaySec=10m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Reload systemd and enable the timer:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now rulegen.timer
-systemctl list-timers rulegen.timer           # shows the next run time
-sudo journalctl -u rulegen.service -n 50     # logs of the last run
-```
+Without `--every` the container exits after one run, which suits a cron
+entry or a systemd timer if you prefer external scheduling.
 
 ## Development
 

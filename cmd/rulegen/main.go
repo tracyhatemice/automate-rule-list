@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/tracyhatemice/automate-rule-list/internal/config"
 	"github.com/tracyhatemice/automate-rule-list/internal/fetch"
@@ -70,6 +72,8 @@ run flags:
       --dry-run       report what would change, write and upload nothing
       --no-upload     write local outputs but skip S3 uploads
       --force         treat every job as changed: new timestamp, re-upload
+      --every DUR     keep running: repeat every DUR (30m, 6h, 1d …) until
+                      SIGINT/SIGTERM; the config is re-read each cycle
   -v                  debug logging
 `)
 }
@@ -86,6 +90,7 @@ type runFlags struct {
 	dryRun   bool
 	noUpload bool
 	force    bool
+	every    string
 	verbose  bool
 }
 
@@ -100,6 +105,7 @@ func parseRunFlags(name string, args []string, stderr io.Writer) (runFlags, erro
 	fs.BoolVar(&f.dryRun, "dry-run", false, "report only")
 	fs.BoolVar(&f.noUpload, "no-upload", false, "skip uploads")
 	fs.BoolVar(&f.force, "force", false, "treat content as changed")
+	fs.StringVar(&f.every, "every", "", "repeat every interval, e.g. 6h or 1d")
 	fs.BoolVar(&f.verbose, "v", false, "debug logging")
 	err := fs.Parse(args)
 	return f, err
@@ -147,14 +153,77 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	log := newLogger(stderr, f.verbose)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	once := func(ctx context.Context) int { return runOnce(ctx, f, stdout, stderr, log) }
+	if f.every == "" {
+		return once(ctx)
+	}
+	interval, err := parseEvery(f.every)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "error: --every:", err)
+		return 2
+	}
+	log.Info("running continuously", "every", interval)
+	return runLoop(ctx, interval, stdout, once)
+}
+
+// minEvery keeps a misconfigured loop from hammering the upstream lists.
+const minEvery = time.Minute
+
+// parseEvery accepts Go durations ("30m", "6h", "1h30m") plus whole days
+// ("1d", "2d") and enforces a one-minute minimum.
+func parseEvery(s string) (time.Duration, error) {
+	var d time.Duration
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.Atoi(n)
+		if err != nil {
+			return 0, fmt.Errorf("%q: days must be a whole number, e.g. 1d", s)
+		}
+		d = time.Duration(days) * 24 * time.Hour
+	} else {
+		var err error
+		if d, err = time.ParseDuration(s); err != nil {
+			return 0, fmt.Errorf("%q: use a duration such as 30m, 6h or 1d", s)
+		}
+	}
+	if d < minEvery {
+		return 0, fmt.Errorf("%q: must be at least %s", s, minEvery)
+	}
+	return d, nil
+}
+
+// runLoop calls once immediately and then every interval, measured from
+// the start of each run, until ctx is cancelled. Failures are reported by
+// each run and never stop the loop; the exit code is 0 on cancellation.
+func runLoop(ctx context.Context, interval time.Duration, stdout io.Writer, once func(context.Context) int) int {
+	for {
+		start := time.Now()
+		once(ctx)
+		if ctx.Err() != nil {
+			return 0
+		}
+		wait := max(interval-time.Since(start), 0)
+		next := time.Now().Add(wait)
+		_, _ = fmt.Fprintf(stdout, "next run at %s (in %s)\n", next.Format(time.RFC3339), wait.Round(time.Second))
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0
+		case <-timer.C:
+		}
+	}
+}
+
+// runOnce loads the config and runs the selected jobs one time.
+func runOnce(ctx context.Context, f runFlags, stdout, stderr io.Writer, log *slog.Logger) int {
 	cfg, err := config.Load(f.config)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	runner := &pipeline.Runner{
 		Cfg: cfg,
 		Fetcher: &fetch.Fetcher{
@@ -181,6 +250,7 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 	}
 
 	results := runner.Run(ctx, f.jobs)
+	_, _ = fmt.Fprintf(stdout, "run at %s\n", time.Now().UTC().Format(time.RFC3339))
 	printResults(stdout, results, f.dryRun)
 	for _, r := range results {
 		if r.Err != nil {

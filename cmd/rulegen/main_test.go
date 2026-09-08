@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 const testCfg = `
@@ -83,5 +86,53 @@ func TestRunDryRunAndNoUpload(t *testing.T) {
 	}
 	if code, out, _ = exec(t, "run", "-c", path, "-j", "nope"); code != 1 || !strings.Contains(out, "nope") {
 		t.Errorf("unknown job: %d %q", code, out)
+	}
+}
+
+func TestParseEvery(t *testing.T) {
+	good := map[string]time.Duration{
+		"6h":    6 * time.Hour,
+		"30m":   30 * time.Minute,
+		"1h30m": 90 * time.Minute,
+		"1d":    24 * time.Hour,
+		"2d":    48 * time.Hour,
+	}
+	for in, want := range good {
+		if got, err := parseEvery(in); err != nil || got != want {
+			t.Errorf("parseEvery(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "30s", "-1h", "abc", "1.5d", "1w"} {
+		if got, err := parseEvery(in); err == nil {
+			t.Errorf("parseEvery(%q) = %v, want error", in, got)
+		}
+	}
+}
+
+func TestRunLoopRepeatsUntilCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var runs atomic.Int32
+	var out bytes.Buffer
+	code := runLoop(ctx, 5*time.Millisecond, &out, func(context.Context) int {
+		if runs.Add(1) == 3 {
+			cancel()
+		}
+		return 1 // failures must not stop the loop
+	})
+	if code != 0 {
+		t.Errorf("code = %d, want 0 on cancellation", code)
+	}
+	if n := runs.Load(); n != 3 {
+		t.Errorf("runs = %d, want 3", n)
+	}
+	if !strings.Contains(out.String(), "next run") {
+		t.Errorf("expected a 'next run' line, got %q", out.String())
+	}
+}
+
+func TestRunEveryFlagRejectsBadInterval(t *testing.T) {
+	_, path := writeCfg(t)
+	if code, _, errs := exec(t, "run", "-c", path, "--every", "10s"); code != 2 || !strings.Contains(errs, "every") {
+		t.Errorf("bad --every: %d %q", code, errs)
 	}
 }
