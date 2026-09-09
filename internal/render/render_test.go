@@ -3,17 +3,23 @@ package render
 import (
 	"bytes"
 	"slices"
+	"strings"
 	"testing"
 )
 
 func render(t *testing.T, name, kind string, hdr Header, lines []string) string {
+	t.Helper()
+	return renderOpt(t, name, kind, hdr, lines, Options{})
+}
+
+func renderOpt(t *testing.T, name, kind string, hdr Header, lines []string, opt Options) string {
 	t.Helper()
 	r, ok := Lookup(name)
 	if !ok {
 		t.Fatalf("renderer %q not registered", name)
 	}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, kind, hdr, lines); err != nil {
+	if err := r.Render(&buf, kind, hdr, lines, opt); err != nil {
 		t.Fatalf("%s/%s: %v", name, kind, err)
 	}
 	return buf.String()
@@ -90,7 +96,79 @@ func TestIPList(t *testing.T) {
 
 func TestUnsupportedKind(t *testing.T) {
 	r, _ := Lookup("smartdns")
-	if err := r.Render(&bytes.Buffer{}, "ip", Header{}, nil); err == nil {
+	if err := r.Render(&bytes.Buffer{}, "ip", Header{}, nil, Options{}); err == nil {
 		t.Fatal("expected error for unsupported kind")
+	}
+}
+
+func TestClashBehavior(t *testing.T) {
+	tests := []struct {
+		kind, behavior string
+		lines          []string
+		want           string
+	}{
+		{"domain", "domain", []string{"a.com", "goog", "xn--flw351e.com"}, "payload:\n  - '+.a.com'\n  - '+.goog'\n  - '+.xn--flw351e.com'\n"},
+		{"domain", "classical", []string{"a.com"}, "payload:\n  - DOMAIN-SUFFIX,a.com\n"},
+		{"domain", "", []string{"a.com"}, "payload:\n  - DOMAIN-SUFFIX,a.com\n"},
+		{"ip", "ipcidr", []string{"1.2.3.4", "10.0.0.0/8", "2001:db8::/32"}, "payload:\n  - '1.2.3.4/32'\n  - '10.0.0.0/8'\n  - '2001:db8::/32'\n"},
+		{"ip", "classical", []string{"1.2.3.4"}, "payload:\n  - IP-CIDR,1.2.3.4/32,no-resolve\n"},
+		{"domain", "domain", nil, "payload: []\n"},
+	}
+	for _, tc := range tests {
+		got := renderOpt(t, "clash", tc.kind, Header{}, tc.lines, Options{Behavior: tc.behavior})
+		if got != tc.want {
+			t.Errorf("clash/%s behavior=%q =\n%q\nwant\n%q", tc.kind, tc.behavior, got, tc.want)
+		}
+	}
+	r, _ := Lookup("clash")
+	for _, bad := range []struct{ kind, behavior string }{{"domain", "ipcidr"}, {"ip", "domain"}, {"domain", "bogus"}, {"clash", "bogus"}} {
+		if err := r.Render(&bytes.Buffer{}, bad.kind, Header{}, []string{"x"}, Options{Behavior: bad.behavior}); err == nil {
+			t.Errorf("kind %s behavior %q should be rejected", bad.kind, bad.behavior)
+		}
+	}
+}
+
+func TestClashKindDomainBehavior(t *testing.T) {
+	lines := []string{
+		"DOMAIN,a.com",
+		"DOMAIN-SUFFIX,b.com",
+		"DOMAIN-WILDCARD,*.c.com",
+		"DOMAIN-WILDCARD,sub.*.d.com",
+		"+.e.com",
+		".f.com",
+		"'g.com'",
+		"DOMAIN-SUFFIX,goog",
+	}
+	want := "payload:\n  - 'a.com'\n  - '+.b.com'\n  - '*.c.com'\n  - 'sub.*.d.com'\n  - '+.e.com'\n  - '.f.com'\n  - 'g.com'\n  - '+.goog'\n"
+	if got := renderOpt(t, "clash", "clash", Header{}, lines, Options{Behavior: "domain"}); got != want {
+		t.Errorf("clash/clash domain =\n%q\nwant\n%q", got, want)
+	}
+	r, _ := Lookup("clash")
+	for _, bad := range []string{
+		"DOMAIN-KEYWORD,telegram",
+		"IP-CIDR,1.2.3.0/24,no-resolve",
+		"DOMAIN-WILDCARD,cdn*.x.com",
+		"DOMAIN-WILDCARD,a.+.b.com",
+		"DOMAIN-WILDCARD,+",
+		"GEOSITE,cn",
+		"DOMAIN-REGEX,^ads",
+		"MATCH",
+	} {
+		err := r.Render(&bytes.Buffer{}, "clash", Header{}, []string{"DOMAIN,ok.com", bad}, Options{Behavior: "domain"})
+		if err == nil || !strings.Contains(err.Error(), bad) {
+			t.Errorf("%q: expected an error naming the rule, got %v", bad, err)
+		}
+	}
+}
+
+func TestClashKindIPCIDRBehavior(t *testing.T) {
+	lines := []string{"IP-CIDR,1.2.3.0/24,no-resolve", "IP-CIDR6,2001:db8::/32", "10.0.0.0/8", "IP-CIDR,9.9.9.9"}
+	want := "payload:\n  - '1.2.3.0/24'\n  - '2001:db8::/32'\n  - '10.0.0.0/8'\n  - '9.9.9.9/32'\n"
+	if got := renderOpt(t, "clash", "clash", Header{}, lines, Options{Behavior: "ipcidr"}); got != want {
+		t.Errorf("clash/clash ipcidr =\n%q\nwant\n%q", got, want)
+	}
+	r, _ := Lookup("clash")
+	if err := r.Render(&bytes.Buffer{}, "clash", Header{}, []string{"DOMAIN-SUFFIX,a.com"}, Options{Behavior: "ipcidr"}); err == nil || !strings.Contains(err.Error(), "DOMAIN-SUFFIX,a.com") {
+		t.Errorf("expected error naming the domain rule, got %v", err)
 	}
 }

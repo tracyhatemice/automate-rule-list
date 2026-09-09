@@ -77,7 +77,7 @@ func (r *Runner) syncOutput(ctx context.Context, job config.Job, out config.Outp
 		hdr.Timestamp = timestamp
 	}
 	var buf bytes.Buffer
-	if err := renderer.Render(&buf, job.Kind, hdr, lines); err != nil {
+	if err := renderer.Render(&buf, job.Kind, hdr, lines, render.Options{Behavior: out.Behavior}); err != nil {
 		return prev, fmt.Errorf("output %s: %w", out.Path, err)
 	}
 	body := buf.Bytes()

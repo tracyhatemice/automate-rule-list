@@ -198,6 +198,55 @@ jobs:
 	}
 }
 
+func TestOutputBehavior(t *testing.T) {
+	cfg, err := parseYAML(t, `
+jobs:
+  - name: d
+    kind: domain
+    sources: [{url: http://x}]
+    outputs:
+      - {format: clash, path: a.yaml, behavior: domain}
+      - {format: clash, path: b.yaml}
+  - name: i
+    kind: ip
+    sources: [{url: http://x}]
+    outputs:
+      - {format: clash, path: c.yaml, behavior: ipcidr}
+  - name: c
+    kind: clash
+    sources: [{url: http://x}]
+    outputs:
+      - {format: clash, path: d.yaml, behavior: domain}
+      - {format: clash, path: e.yaml, behavior: ipcidr}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Jobs[0].Outputs[0].Behavior; got != "domain" {
+		t.Errorf("behavior = %q", got)
+	}
+	if got := cfg.Jobs[0].Outputs[1].Behavior; got != "classical" {
+		t.Errorf("default behavior = %q, want classical", got)
+	}
+	if got := cfg.Jobs[1].Outputs[0].Behavior; got != "ipcidr" {
+		t.Errorf("ip behavior = %q", got)
+	}
+	if cfg.Jobs[2].Outputs[0].Behavior != "domain" || cfg.Jobs[2].Outputs[1].Behavior != "ipcidr" {
+		t.Errorf("clash kind behaviors = %+v", cfg.Jobs[2].Outputs)
+	}
+	for name, yaml := range map[string]string{
+		"behavior on plain":       "jobs:\n  - {name: a, kind: domain, sources: [{url: http://x}], outputs: [{format: plain, path: p, behavior: domain}]}\n",
+		"unknown behavior":        "jobs:\n  - {name: a, kind: domain, sources: [{url: http://x}], outputs: [{format: clash, path: p, behavior: fast}]}\n",
+		"domain behavior on ip":   "jobs:\n  - {name: a, kind: ip, sources: [{url: http://x}], outputs: [{format: clash, path: p, behavior: domain}]}\n",
+		"ipcidr on domain":        "jobs:\n  - {name: a, kind: domain, sources: [{url: http://x}], outputs: [{format: clash, path: p, behavior: ipcidr}]}\n",
+		"bogus behavior on clash": "jobs:\n  - {name: a, kind: clash, sources: [{url: http://x}], outputs: [{format: clash, path: p, behavior: trie}]}\n",
+	} {
+		if _, err := parseYAML(t, yaml); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+}
+
 func TestValidationErrors(t *testing.T) {
 	tests := map[string]string{
 		"unknown key":             "jobs:\n  - name: a\n    kind: domain\n    bogus: 1\n    sources: [{url: http://x}]\n    outputs: [{format: plain, path: p}]\n",

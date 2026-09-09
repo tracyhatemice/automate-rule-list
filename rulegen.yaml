@@ -43,6 +43,7 @@ jobs:
         s3: { key: smartdns/adblock.conf }
       - format: clash
         path: dist/clash/adblock.yaml
+        behavior: domain           # '+.host' payload; the mihomo rule-provider must also say behavior: domain
         s3: { key: clash/adblock.yaml }
 
   # ---------------------------------------------------------------- Mod 2
@@ -187,6 +188,7 @@ jobs:
         s3: { key: pbr.list }
       - format: clash
         path: dist/clash/gfwlist.yaml
+        behavior: domain
         s3: { key: clash/gfwlist.yaml }
       - format: smartdns
         path: dist/smartdns/pbr.conf
@@ -215,6 +217,7 @@ jobs:
         s3: { key: domestic-dns.list }
       - format: clash
         path: dist/clash/domestic.yaml
+        behavior: domain
         s3: { key: clash/domestic.yaml }
       - format: smartdns
         path: dist/smartdns/domestic.conf

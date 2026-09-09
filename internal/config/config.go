@@ -96,6 +96,7 @@ type Filter struct {
 type Output struct {
 	Format    string
 	Path      string
+	Behavior  string // clash only: classical | domain | ipcidr
 	Header    []string
 	Timestamp *bool
 	S3        []S3Target // every target receives the same file; nil when not uploaded
@@ -192,6 +193,7 @@ type rawFilter struct {
 type rawOutput struct {
 	Format    string        `yaml:"format"`
 	Path      string        `yaml:"path"`
+	Behavior  string        `yaml:"behavior"`
 	Header    []string      `yaml:"header"`
 	Timestamp *bool         `yaml:"timestamp"`
 	S3        *rawS3Targets `yaml:"s3"`
@@ -411,13 +413,21 @@ func buildSource(r rawSource) (Source, error) {
 }
 
 func buildOutput(r rawOutput, kind string) (Output, error) {
-	o := Output{Format: r.Format, Path: r.Path, Header: r.Header, Timestamp: r.Timestamp}
+	o := Output{Format: r.Format, Path: r.Path, Behavior: r.Behavior, Header: r.Header, Timestamp: r.Timestamp}
 	rd, ok := render.Lookup(o.Format)
 	if !ok {
 		return o, fmt.Errorf("unknown format %q (known: %s)", o.Format, strings.Join(render.Names(), ", "))
 	}
 	if !rd.Supports(kind) {
 		return o, fmt.Errorf("format %q cannot render %s jobs", o.Format, kind)
+	}
+	if o.Format == "clash" {
+		if err := render.ValidateClashBehavior(kind, render.Options{Behavior: o.Behavior}); err != nil {
+			return o, err
+		}
+		o.Behavior = orDefault(o.Behavior, render.BehaviorClassical)
+	} else if o.Behavior != "" {
+		return o, fmt.Errorf("behavior is only valid for clash outputs, not %q", o.Format)
 	}
 	if o.Path == "" {
 		return o, errors.New("path is required")

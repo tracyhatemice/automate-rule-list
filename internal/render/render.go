@@ -17,11 +17,19 @@ type Header struct {
 	Timestamp string   // rendered as "# last updated: …"; empty omits it
 }
 
+// Options tunes a renderer for one output.
+type Options struct {
+	// Behavior selects the clash rule-provider payload style: "classical"
+	// (default), "domain" ("+.host" entries, domain jobs only) or "ipcidr"
+	// (bare CIDR entries, ip jobs only).
+	Behavior string
+}
+
 // Renderer renders intermediate lines of a job kind.
 type Renderer interface {
 	Name() string
 	Supports(kind string) bool
-	Render(w io.Writer, kind string, hdr Header, lines []string) error
+	Render(w io.Writer, kind string, hdr Header, lines []string, opt Options) error
 }
 
 var (
@@ -73,19 +81,27 @@ func WriteHeader(w io.Writer, hdr Header) error {
 
 // lineRenderer renders every line through a per-kind formatter.
 type lineRenderer struct {
-	name    string
-	kinds   map[string]bool
-	prelude string
-	empty   string // written instead of prelude when there are no lines
-	format  func(kind, line string) string
+	name     string
+	kinds    map[string]bool
+	prelude  string
+	empty    string // written instead of prelude when there are no lines
+	validate func(kind string, opt Options) error
+	format   func(kind, line string, opt Options) (string, error)
 }
 
 func (r lineRenderer) Name() string              { return r.name }
 func (r lineRenderer) Supports(kind string) bool { return r.kinds[kind] }
 
-func (r lineRenderer) Render(w io.Writer, kind string, hdr Header, lines []string) error {
+func (r lineRenderer) Render(w io.Writer, kind string, hdr Header, lines []string, opt Options) error {
 	if !r.Supports(kind) {
 		return fmt.Errorf("renderer %q does not support %q jobs", r.name, kind)
+	}
+	if r.validate != nil {
+		if err := r.validate(kind, opt); err != nil {
+			return fmt.Errorf("renderer %q: %w", r.name, err)
+		}
+	} else if opt.Behavior != "" {
+		return fmt.Errorf("renderer %q does not take a behavior", r.name)
 	}
 	if err := WriteHeader(w, hdr); err != nil {
 		return err
@@ -100,7 +116,11 @@ func (r lineRenderer) Render(w io.Writer, kind string, hdr Header, lines []strin
 		}
 	}
 	for _, l := range lines {
-		if _, err := io.WriteString(w, r.format(kind, l)+"\n"); err != nil {
+		out, err := r.format(kind, l, opt)
+		if err != nil {
+			return fmt.Errorf("renderer %q: %w", r.name, err)
+		}
+		if _, err := io.WriteString(w, out+"\n"); err != nil {
 			return err
 		}
 	}
@@ -108,17 +128,18 @@ func (r lineRenderer) Render(w io.Writer, kind string, hdr Header, lines []strin
 }
 
 func init() {
-	identity := func(_, line string) string { return line }
+	identity := func(_, line string, _ Options) (string, error) { return line, nil }
 	Register(lineRenderer{name: "plain", kinds: map[string]bool{"domain": true, "ip": true}, format: identity})
 	Register(lineRenderer{name: "iplist", kinds: map[string]bool{"ip": true}, format: identity})
-	Register(lineRenderer{name: "smartdns", kinds: map[string]bool{"domain": true}, format: func(_, line string) string {
-		return "address /" + line + "/#"
+	Register(lineRenderer{name: "smartdns", kinds: map[string]bool{"domain": true}, format: func(_, line string, _ Options) (string, error) {
+		return "address /" + line + "/#", nil
 	}})
 	Register(lineRenderer{
-		name:    "clash",
-		kinds:   map[string]bool{"domain": true, "ip": true, "clash": true},
-		prelude: "payload:\n",
-		empty:   "payload: []\n",
-		format:  clashLine,
+		name:     "clash",
+		kinds:    map[string]bool{"domain": true, "ip": true, "clash": true},
+		prelude:  "payload:\n",
+		empty:    "payload: []\n",
+		validate: ValidateClashBehavior,
+		format:   clashLine,
 	})
 }

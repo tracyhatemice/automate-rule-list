@@ -62,6 +62,7 @@ jobs:
     outputs:
       - format: smartdns                # plain | iplist | smartdns | clash
         path: dist/example.conf         # relative to the config file
+        behavior: classical             # clash only: classical | domain | ipcidr (see Output formats)
         header: ["mirror of https://…"] # extra "# …" lines before the timestamp
         timestamp: true                 # "# last updated: …" line
         s3:                             # one target …
@@ -229,9 +230,18 @@ decodes base64 bodies such as gfwlist.
 
 - `plain` / `iplist`: one entry per line.
 - `smartdns`: `address /example.com/#`.
-- `clash`: rule-provider YAML. Domains become `DOMAIN-SUFFIX,…`, addresses
-  `IP-CIDR,…,no-resolve`, clash rules are kept; domain-behaviour scalars are
-  single-quoted.
+- `clash`: rule-provider YAML. With the default `behavior: classical`,
+  domains become `DOMAIN-SUFFIX,…`, addresses `IP-CIDR,…,no-resolve`, and
+  clash rules are kept (scalars single-quoted). `behavior: domain` writes
+  `'+.host'` entries and `behavior: ipcidr` bare `'10.0.0.0/8'` entries,
+  the trie- and set-backed formats mihomo matches much faster for large
+  lists; the consuming rule-provider must declare the same `behavior`.
+  A `clash` job can use them too when every rule converts: `DOMAIN` →
+  `host`, `DOMAIN-SUFFIX` → `+.host`, `DOMAIN-WILDCARD` and quoted scalars
+  as they are (`*` and `+` must be whole labels, `+` only first), and
+  `IP-CIDR` → the block. A keyword, regex, GEOSITE or IP rule in a
+  `domain` output (or a domain rule in an `ipcidr` output) fails the job
+  naming the rule.
 
 Every output starts with the optional `header` lines and
 `# last updated: <timestamp>`.

@@ -589,3 +589,64 @@ jobs:
 		t.Fatalf("retry run: %+v", res)
 	}
 }
+
+func TestClashDomainBehaviorOutput(t *testing.T) {
+	e := newEnv(t)
+	e.set("/list.txt", "b.com\nsub.a.com\na.com\n")
+	res := e.run(`
+jobs:
+  - name: ad
+    kind: domain
+    sources: [{url: SRV/list.txt}]
+    outputs:
+      - {format: clash, path: ad.yaml, behavior: domain, timestamp: false}
+      - {format: clash, path: ad-classical.yaml, timestamp: false}
+`)
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if got := e.read("ad.yaml"); got != "payload:\n  - '+.a.com'\n  - '+.b.com'\n" {
+		t.Errorf("domain behavior = %q", got)
+	}
+	if got := e.read("ad-classical.yaml"); got != "payload:\n  - DOMAIN-SUFFIX,a.com\n  - DOMAIN-SUFFIX,b.com\n" {
+		t.Errorf("classical = %q", got)
+	}
+}
+
+func TestClashKindDomainBehaviorOutput(t *testing.T) {
+	e := newEnv(t)
+	e.set("/google.yaml", "payload:\n  - DOMAIN-SUFFIX,google.com\n  - DOMAIN,www.gstatic.com\n  - DOMAIN-WILDCARD,*.googleapis.com\n")
+	e.set("/private.txt", "payload:\n  - 'router.asus.com'\n  - '+.internal'\n")
+	cfg := `
+jobs:
+  - name: google
+    kind: clash
+    sources:
+      - url: SRV/google.yaml
+      - inline: "gvt1.com\n"
+    outputs:
+      - {format: clash, path: google.yaml, behavior: domain, timestamp: false}
+  - name: private
+    kind: clash
+    mode: mirror
+    sources: [{url: SRV/private.txt}]
+    outputs:
+      - {format: clash, path: private.yaml, behavior: domain, timestamp: false}
+`
+	res := e.runner(cfg).Run(context.Background(), nil)
+	if res[0].Err != nil || res[1].Err != nil {
+		t.Fatalf("results: %+v", res)
+	}
+	if got := e.read("google.yaml"); got != "payload:\n  - 'www.gstatic.com'\n  - '+.google.com'\n  - '+.gvt1.com'\n  - '*.googleapis.com'\n" {
+		t.Errorf("google.yaml = %q", got)
+	}
+	if got := e.read("private.yaml"); got != "payload:\n  - 'router.asus.com'\n  - '+.internal'\n" {
+		t.Errorf("private.yaml = %q", got)
+	}
+	// a rule that cannot be expressed as a domain wildcard fails the job loudly
+	e.set("/google.yaml", "payload:\n  - DOMAIN-SUFFIX,google.com\n  - DOMAIN-KEYWORD,google\n")
+	res = e.runner(cfg).Run(context.Background(), []string{"google"})
+	if res[0].Err == nil || !strings.Contains(res[0].Err.Error(), "DOMAIN-KEYWORD,google") {
+		t.Fatalf("expected error naming the keyword rule, got %v", res[0].Err)
+	}
+}
